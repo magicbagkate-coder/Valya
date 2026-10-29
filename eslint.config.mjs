@@ -185,11 +185,12 @@ export default tseslint.config(
     rules: { 'no-restricted-properties': 'off', 'id-denylist': 'off' },
   },
   {
-    // Tests: allow long files and console
+    // Tests: allow long files and console. node:test returns a promise from describe and it, and the runner awaits it.
     files: ['**/*.test.ts', '**/*.spec.ts'],
     rules: {
       'max-lines': 'off',
       'no-console': 'off',
+      '@typescript-eslint/no-floating-promises': 'off',
     },
   },
   {

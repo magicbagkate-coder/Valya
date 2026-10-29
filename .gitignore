@@ -21,3 +21,5 @@ Thumbs.db
 
 # Original rules archive (already extracted to docs/rules)
 *.zip
+google-key.json
+*-key.json

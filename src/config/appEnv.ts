@@ -1,5 +1,5 @@
 // The only file that reads process.env. See docs/rules/env-config.md
-const DEFAULT_PORT = 3000;
+const DEFAULT_PORT = 14000;
 
 function readPort(): number {
   const raw = process.env.PORT;

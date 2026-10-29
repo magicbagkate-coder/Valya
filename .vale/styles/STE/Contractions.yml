@@ -1,0 +1,6 @@
+extends: existence
+message: "Write the full form of '%s'. See docs/rules/language-ste.md"
+level: warning
+tokens:
+  - "\\w+n't"
+  - "\\w+'(?:re|ve|ll|s)"

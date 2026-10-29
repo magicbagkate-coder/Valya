@@ -1,0 +1,6 @@
+extends: existence
+message: "Use the active voice. Rewrite '%s'. See docs/rules/language-ste.md"
+level: warning
+ignorecase: true
+tokens:
+  - '(?:is|are|was|were|be|been|being)\s+(?:\w{3,}ed|written|done|given|taken|shown|known|seen|made|built|sent|kept|found|held|thrown|broken|chosen|hidden|driven|begun|gotten)\b'

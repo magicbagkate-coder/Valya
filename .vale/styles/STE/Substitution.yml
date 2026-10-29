@@ -1,0 +1,16 @@
+extends: substitution
+message: "Use '%s' instead of '%s'. See docs/rules/language-ste.md"
+level: warning
+ignorecase: false
+swap:
+  '[Ss]hould': must
+  '[Mm]ight': can
+  '[Cc]ould': can
+  may: can
+  '[Uu]tilize': use
+  '[Ii]n order to': to
+  'e\.g\.': for example
+  'i\.e\.': that is
+  'etc\.?': the full list
+  '[Ee]asy': simple
+  '[Oo]bvious': clear

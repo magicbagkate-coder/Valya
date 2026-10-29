@@ -8,13 +8,20 @@ import type { ChatState } from './chatState';
 import { appEnv } from '@/config/appEnv';
 import { AgentService } from '@/modules/agent';
 import { ClaudeService } from '@/modules/claude';
-import { detectKind, loadRows, parseHints } from '@/modules/report';
+import { detectKind, loadRows, parseHints, previewRows } from '@/modules/report';
 import { describeState } from './describeState';
 import { hintsToState } from './hintsToState';
 import { splitMessage } from './splitMessage';
 
 // A text with a digit or a month or period word can hold a period. Then Claude reads it.
 const MAYBE_HINT = /\d|январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр|недел|вчера|сегодня/i;
+
+const UNKNOWN_TEXT = [
+  'Не узнал файл «{name}». Я жду файл 1С одного из двух видов:',
+  '• Продажи: без шапки, в колонке A название и артикул через запятую («… шкіра M1103-BL COFFEE, M1103-BL COFFEE»), в колонке B количество.',
+  '• Остатки: две строки шапки с «Характеристика» и «Итого», данные с 3-й строки.',
+  'Проверь, что это нужный файл, и пришли ещё раз.',
+].join('\n');
 
 type ReceivedFile = { kind: 'sales' | 'stock'; buffer: Buffer };
 
@@ -80,18 +87,26 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     return { ...hintsToState(await this.claude.extractHints(text)), ...found };
   }
 
+  private async rejectFile(ctx: Context, name: string, preview: string): Promise<undefined> {
+    this.log.warn(`Unknown file "${name}". First rows: ${preview.split('\n').join(' // ')}`);
+    const seen = preview || '(пусто)';
+    await ctx.reply([UNKNOWN_TEXT.replace('{name}', name), '', 'Вот что я увидел в начале файла:', seen].join('\n'));
+    return undefined;
+  }
+
   private async receiveFile(ctx: Context): Promise<ReceivedFile | undefined> {
     const document = ctx.message?.document;
-    if (!document || !/\.xlsx$/i.test(document.file_name ?? '')) {
-      await ctx.reply('Пришли файл в формате .xlsx.');
+    const name = document?.file_name ?? '';
+    if (!document || !/\.xlsx$/i.test(name)) {
+      this.log.warn(`Rejected file "${name}": it is not .xlsx`);
+      await ctx.reply(`Не принял файл «${name}»: нужен формат .xlsx (не .xls и не .csv).`);
       return undefined;
     }
     const buffer = await this.downloadFile(ctx, document.file_id);
-    const kind = detectKind(await loadRows(buffer));
-    if (kind === 'unknown') {
-      await ctx.reply('Не понял, что это за файл. Мне нужен файл продаж или файл остатков из 1С.');
-      return undefined;
-    }
+    const rows = await loadRows(buffer);
+    const kind = detectKind(rows);
+    this.log.log(`File "${name}" (${buffer.length} bytes) is ${kind}`);
+    if (kind === 'unknown') return this.rejectFile(ctx, name, previewRows(rows));
     return { kind, buffer };
   }
 

@@ -8,6 +8,7 @@ export { parseHints } from './parseHints';
 export type { Hints } from './parseHints';
 export { parseHintsJson } from './parseHintsJson';
 export type { PlanResult } from './planResult';
+export { previewRows } from './previewRows';
 export { readSales } from './readSales';
 export { readStock } from './readStock';
 export type { TableRow } from './tableRow';

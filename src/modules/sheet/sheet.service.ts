@@ -7,7 +7,7 @@ import { appEnv } from '@/config/appEnv';
 import { normalizeArticle } from '@/modules/report';
 import { buildCells } from './buildCells';
 import { columnLetter } from './columnLetter';
-import { sameWeek } from './sameWeek';
+import { samePeriod } from './samePeriod';
 import { SHEET_TITLE } from './sheetTitle';
 import { createSheetClient } from './sheetClient';
 
@@ -78,7 +78,7 @@ export class SheetService {
   async writePlan(snapshot: SheetSnapshot, plan: PlanResult, labels: { period: string; stockDate: string }): Promise<ReportColumns> {
     const spreadsheetId = this.requireSheetId();
     const left = snapshot.headers[snapshot.stockIndex - 1] ?? '';
-    const inserted = !sameWeek(left, labels.period);
+    const inserted = !samePeriod(left, labels.period);
     if (inserted) await this.insertWeekColumn(spreadsheetId, snapshot);
     const salesColumn = columnLetter(inserted ? snapshot.stockIndex : snapshot.stockIndex - 1);
     const stockColumn = columnLetter(inserted ? snapshot.stockIndex + 1 : snapshot.stockIndex);

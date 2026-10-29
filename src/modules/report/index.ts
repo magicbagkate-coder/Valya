@@ -6,6 +6,7 @@ export { loadRows } from './loadRows';
 export { normalizeArticle } from './normalizeArticle';
 export { parseHints } from './parseHints';
 export type { Hints } from './parseHints';
+export { parseHintsJson } from './parseHintsJson';
 export type { PlanResult } from './planResult';
 export { readSales } from './readSales';
 export { readStock } from './readStock';

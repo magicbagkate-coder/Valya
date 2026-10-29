@@ -10,7 +10,11 @@ import { AgentService } from '@/modules/agent';
 import { ClaudeService } from '@/modules/claude';
 import { detectKind, loadRows, parseHints } from '@/modules/report';
 import { describeState } from './describeState';
+import { hintsToState } from './hintsToState';
 import { splitMessage } from './splitMessage';
+
+// A text with a digit or a month or period word can hold a period. Then Claude reads it.
+const MAYBE_HINT = /\d|январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр|недел|вчера|сегодня/i;
 
 type ReceivedFile = { kind: 'sales' | 'stock'; buffer: Buffer };
 
@@ -69,9 +73,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     return Buffer.from(await response.arrayBuffer());
   }
 
-  private cleanHints(text: string): ChatState {
-    const hints = parseHints(text);
-    return { ...(hints.period ? { period: hints.period } : {}), ...(hints.stockDate ? { stockDate: hints.stockDate } : {}) };
+  // The code reads the plain forms. Claude reads the rest, for example "за октябрь".
+  private async findHints(text: string): Promise<ChatState> {
+    const found = hintsToState(parseHints(text));
+    if ((found.period && found.stockDate) || !MAYBE_HINT.test(text)) return found;
+    return { ...hintsToState(await this.claude.extractHints(text)), ...found };
   }
 
   private async receiveFile(ctx: Context): Promise<ReceivedFile | undefined> {
@@ -94,7 +100,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (!received) return;
     const state = this.stateFor(ctx);
     state[received.kind] = received.buffer;
-    Object.assign(state, this.cleanHints(ctx.message?.caption ?? ''));
+    Object.assign(state, await this.findHints(ctx.message?.caption ?? ''));
     await ctx.reply(received.kind === 'sales' ? 'Принял файл продаж.' : 'Принял файл остатков.');
     await this.runIfReady(ctx, state);
   }
@@ -102,7 +108,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private async onText(ctx: Context): Promise<void> {
     const text = ctx.message?.text ?? '';
     const state = this.stateFor(ctx);
-    const hints = this.cleanHints(text);
+    const hints = await this.findHints(text);
     if (Object.keys(hints).length > 0) {
       Object.assign(state, hints);
       await this.runIfReady(ctx, state);

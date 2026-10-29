@@ -5,7 +5,7 @@ export function describeState(state: ChatState): { have: string[]; missing: stri
   const checks: [string, boolean][] = [
     ['файл продаж', state.sales !== undefined],
     ['файл остатков', state.stock !== undefined],
-    ['период продаж (например 21-26.10)', state.period !== undefined],
+    ['период продаж (неделя, день или месяц, например 21-26.10 или 21.10)', state.period !== undefined],
     ['дата остатков (например 27,10)', state.stockDate !== undefined],
   ];
   return {

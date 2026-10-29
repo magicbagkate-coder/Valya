@@ -3,17 +3,18 @@ import { describe, it } from 'node:test';
 
 import { buildCells } from './buildCells';
 import { columnLetter } from './columnLetter';
-import { sameWeek } from './sameWeek';
+import { samePeriod } from './samePeriod';
 
 describe('sheet helpers', () => {
   it('turns an index into column letters', () => {
     assert.deepEqual([0, 3, 25, 26, 46].map(columnLetter), ['A', 'D', 'Z', 'AA', 'AU']);
   });
 
-  it('treats the same first day and month as the same week', () => {
-    assert.equal(sameWeek('21-27,10', '21-26,10'), true);
-    assert.equal(sameWeek('14-20,10', '21-26,10'), false);
-    assert.equal(sameWeek('Приход', '21-26,10'), false);
+  it('reuses a column only when the period text is equal', () => {
+    assert.equal(samePeriod('21-27,10', '21-27.10'), true);
+    assert.equal(samePeriod('21-27,10', '21-26,10'), false);
+    assert.equal(samePeriod('01-07,10', '01-31,10'), false);
+    assert.equal(samePeriod('Приход', '21,10'), false);
   });
 
   it('lists only the cells of the plan', () => {

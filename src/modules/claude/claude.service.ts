@@ -5,6 +5,7 @@ import type { Hints } from '@/modules/report';
 import type { ChatReply } from './chatReply';
 
 import { MemoryService } from '@/modules/memory';
+import { clockText, formatDue, ReminderService } from '@/modules/reminder';
 import { parseHintsJson } from '@/modules/report';
 import { createAnthropic } from './anthropicClient';
 import { buildContext } from './buildContext';
@@ -15,6 +16,7 @@ import { FILES_BETA } from './filesBeta';
 import { LABEL_TOOL } from './labelTool';
 import { pickRecent } from './pickRecent';
 import { readReply } from './readReply';
+import { CANCEL_TOOL, REMINDER_TOOL } from './reminderTool';
 import { userContent } from './userContent';
 import { WEB_SEARCH_TOOL } from './webSearchTool';
 
@@ -33,6 +35,10 @@ const HELP_TEXT = [
 
 const OFFLINE_TEXT = 'Сейчас я не могу подключиться к ИИ и отвечаю только по делу.\n';
 const TOO_LONG_TEXT = 'Расчёт занял слишком много времени. Попробуй спросить проще или по частям.';
+const SKIPPED_TEXT = 'Не получилось поставить напоминание: время непонятно или уже прошло. Скажи, на когда его поставить.';
+
+// A reply of the code itself: no labels, no reminders.
+const NO_ACTIONS = { labels: {}, reminders: [], cancels: [], skipped: 0 };
 
 const EXTRACT_TEXT = `Extract two labels from a Russian message of a shop employee.
 "period" is the sales period. "stockDate" is the date of the stock (остатки).
@@ -46,8 +52,11 @@ Answer with JSON only: {"period": string or null, "stockDate": string or null}`;
 export type ChatInput = { chatId: number; text: string; facts: string };
 type Request = { system: string; tools: Anthropic.Messages.ToolUnion[]; messages: Anthropic.Messages.MessageParam[] };
 
-// From the most to the least. 1) all: labels, internet, code sandbox. 2) labels and internet. 3) labels only.
-const TOOL_LEVELS: Anthropic.Messages.ToolUnion[][] = [[LABEL_TOOL, WEB_SEARCH_TOOL, CODE_TOOL], [LABEL_TOOL, WEB_SEARCH_TOOL], [LABEL_TOOL]];
+// The tools of the code itself. They work at every level.
+const BASE_TOOLS: Anthropic.Messages.ToolUnion[] = [LABEL_TOOL, REMINDER_TOOL, CANCEL_TOOL];
+
+// From the most to the least. 1) all: base tools, internet, code sandbox. 2) base tools and internet. 3) base tools only.
+const TOOL_LEVELS: Anthropic.Messages.ToolUnion[][] = [[...BASE_TOOLS, WEB_SEARCH_TOOL, CODE_TOOL], [...BASE_TOOLS, WEB_SEARCH_TOOL], BASE_TOOLS];
 
 const todayText = (): string => new Date().toISOString().slice(0, 10);
 
@@ -70,6 +79,7 @@ export class ClaudeService {
   constructor(
     private readonly memory: MemoryService,
     private readonly files: FileService,
+    private readonly reminders: ReminderService,
   ) {}
 
   /** Forgets the talk and the data file of a chat. The last report stays. */
@@ -79,7 +89,22 @@ export class ClaudeService {
   }
 
   private contextOf(input: ChatInput): string {
-    return buildContext(input.facts, { lastReport: this.memory.loadReport(input.chatId), fileName: this.memory.loadFile(input.chatId)?.name });
+    const pending = this.reminders.listFor(input.chatId).map((item) => `№${item.id} ${formatDue(item.dueAt)} — ${item.text}`);
+    return buildContext(input.facts, { lastReport: this.memory.loadReport(input.chatId), fileName: this.memory.loadFile(input.chatId)?.name, reminders: pending });
+  }
+
+  // The code does what Claude asked: it cancels and sets the reminders, then adds the exact result to the answer.
+  private applyReminders(chatId: number, reply: ChatReply): ChatReply {
+    const cancelled = reply.cancels.map((id) =>
+      this.reminders.cancelReminder({ chatId, id }) ? `Напоминание №${id} отменено.` : `Напоминания №${id} нет.`,
+    );
+    const set = reply.reminders.map((request) => {
+      const item = this.reminders.addReminder({ chatId, ...request });
+      return `⏰ Напомню ${formatDue(item.dueAt)}: ${item.text} (№${item.id}).`;
+    });
+    const failed = reply.skipped > 0 ? [SKIPPED_TEXT] : [];
+    const notes = [...cancelled, ...set, ...failed].join('\n');
+    return { ...reply, text: [reply.text, notes].filter((part) => part !== '').join('\n\n') };
   }
 
   // One request. If Claude pauses a long calculation, the loop sends its work back so that it can go on.
@@ -90,17 +115,17 @@ export class ClaudeService {
         { model: MODEL_NAME, max_tokens: CHAT_TOKENS, system: request.system, tools: request.tools, messages },
         { headers: { 'anthropic-beta': FILES_BETA } },
       );
-      if (response?.stop_reason !== 'pause_turn') return readReply(response?.content ?? []);
+      if (response?.stop_reason !== 'pause_turn') return readReply(response?.content ?? [], Date.now());
       messages.push({ role: 'assistant', content: response.content });
     }
-    return { text: TOO_LONG_TEXT, labels: {} };
+    return { text: TOO_LONG_TEXT, ...NO_ACTIONS };
   }
 
   // The data file goes into the request only when the code sandbox is one of the tools.
   private async askChat(input: ChatInput, tools: Anthropic.Messages.ToolUnion[]): Promise<ChatReply> {
     const file = tools.includes(CODE_TOOL) ? this.memory.loadFile(input.chatId) : undefined;
     return this.sendRequest({
-      system: `${ASSISTANT_PROMPT.replaceAll('{today}', todayText())}\n\nCONTEXT (facts of this chat)\n${this.contextOf(input)}`,
+      system: `${ASSISTANT_PROMPT.replaceAll('{today}', todayText()).replaceAll('{now}', clockText(Date.now()))}\n\nCONTEXT (facts of this chat)\n${this.contextOf(input)}`,
       tools,
       messages: [...pickRecent(this.memory.loadTurns(input.chatId)), { role: 'user', content: userContent(input.text, file) }],
     });
@@ -126,9 +151,9 @@ export class ClaudeService {
    * If the user tells the period or the date, Claude saves them with the tool.
    */
   async talkToUser(input: ChatInput): Promise<ChatReply> {
-    if (!this.client) return { text: HELP_TEXT, labels: {} };
+    if (!this.client) return { text: HELP_TEXT, ...NO_ACTIONS };
     try {
-      const reply = await this.askWithFallback(input);
+      const reply = this.applyReminders(input.chatId, await this.askWithFallback(input));
       this.memory.addTurns(input.chatId, [
         { role: 'user', content: input.text },
         { role: 'assistant', content: turnNote(reply) },
@@ -136,7 +161,7 @@ export class ClaudeService {
       return reply;
     } catch (error) {
       this.log.error(`Claude chat failed: ${error instanceof Error ? error.message : String(error)}`);
-      return { text: `${OFFLINE_TEXT}${HELP_TEXT}`, labels: {} };
+      return { text: `${OFFLINE_TEXT}${HELP_TEXT}`, ...NO_ACTIONS };
     }
   }
 

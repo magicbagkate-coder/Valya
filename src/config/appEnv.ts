@@ -28,5 +28,6 @@ export const appEnv = {
   anthropicKey: readText('ANTHROPIC_API_KEY'),
   googleKeyPath: readText('GOOGLE_KEY_PATH') ?? './google-key.json',
   sheetId: readText('SHEET_ID'),
+  dataDir: readText('DATA_DIR') ?? './data',
   allowedIds: readIds(),
 };

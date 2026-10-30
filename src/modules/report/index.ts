@@ -1,4 +1,5 @@
 export { buildPlan } from './buildPlan';
+export { cleanLabels } from './cleanLabels';
 export { detectKind } from './detectKind';
 export { formatReport } from './formatReport';
 export type { ReportColumns } from './formatReport';

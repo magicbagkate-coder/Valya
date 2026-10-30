@@ -4,7 +4,10 @@ services:
     container_name: valya
     restart: unless-stopped
     env_file: .env
+    environment:
+      DATA_DIR: /app/data
     ports:
       - "14000:14000"
     volumes:
       - ./google-key.json:/app/google-key.json:ro
+      - ./data:/app/data

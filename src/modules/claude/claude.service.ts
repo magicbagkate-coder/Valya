@@ -1,13 +1,28 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { Injectable, Logger } from '@nestjs/common';
 
+import type Anthropic from '@anthropic-ai/sdk';
 import type { Hints } from '@/modules/report';
+import type { ChatReply } from './chatReply';
 
-import { appEnv } from '@/config/appEnv';
+import { MemoryService } from '@/modules/memory';
 import { parseHintsJson } from '@/modules/report';
+import { createAnthropic } from './anthropicClient';
+import { buildContext } from './buildContext';
+import { FileService } from './file.service';
+import { ASSISTANT_PROMPT } from './assistantPrompt';
+import { CODE_TOOL } from './codeTool';
+import { FILES_BETA } from './filesBeta';
+import { LABEL_TOOL } from './labelTool';
+import { pickRecent } from './pickRecent';
+import { readReply } from './readReply';
+import { userContent } from './userContent';
+import { WEB_SEARCH_TOOL } from './webSearchTool';
 
 const MODEL_NAME = 'claude-sonnet-5-5';
-const MAX_TOKENS = 500;
+const CHAT_TOKENS = 3000;
+const EXTRACT_TOKENS = 300;
+// A long calculation can pause the answer. The bot then asks Claude to go on, up to this many times.
+const MAX_ROUNDS = 5;
 
 const HELP_TEXT = [
   'Я вношу продажи и остатки из файлов 1С в Google-таблицу.',
@@ -16,12 +31,8 @@ const HELP_TEXT = [
   'Когда всё есть, я запишу данные в таблицу и пришлю сводку.',
 ].join('\n');
 
-const SYSTEM_TEXT = `You are Valya, a Telegram assistant of a small shop team.
-Your only job: the user sends two 1C Excel files (sales for a period, stock for a date) and tells the sales period and the stock date. The period can be a day, a week, a month, or any range. Code outside this chat writes them to the Google sheet and sends the report.
-You cannot write to the table yourself. Never say that you wrote or changed anything.
-Answer in Russian, in 1 to 3 short sentences. If the user asks how to use you, say: send both files, then write the period and the date, for example "продажи 21-26.10, остатки 27,10".
-If the user asks something outside this job, say briefly that you only help with sales and stock files.
-The line "Status" shows what the bot already has. Use it to say what is still missing.`;
+const OFFLINE_TEXT = 'Сейчас я не могу подключиться к ИИ и отвечаю только по делу.\n';
+const TOO_LONG_TEXT = 'Расчёт занял слишком много времени. Попробуй спросить проще или по частям.';
 
 const EXTRACT_TEXT = `Extract two labels from a Russian message of a shop employee.
 "period" is the sales period. "stockDate" is the date of the stock (остатки).
@@ -31,39 +42,119 @@ A week "с 21 по 27 октября" is "21-27,10". Today is {today}; use it fo
 Use null for a label that the message does not say. Do not guess.
 Answer with JSON only: {"period": string or null, "stockDate": string or null}`;
 
-/** Talks to the user in free text and reads periods from free text. It never touches the sheet. */
+/** One message of the user and the facts about the chat. */
+export type ChatInput = { chatId: number; text: string; facts: string };
+type Request = { system: string; tools: Anthropic.Messages.ToolUnion[]; messages: Anthropic.Messages.MessageParam[] };
+
+// From the most to the least. 1) all: labels, internet, code sandbox. 2) labels and internet. 3) labels only.
+const TOOL_LEVELS: Anthropic.Messages.ToolUnion[][] = [[LABEL_TOOL, WEB_SEARCH_TOOL, CODE_TOOL], [LABEL_TOOL, WEB_SEARCH_TOOL], [LABEL_TOOL]];
+
+const todayText = (): string => new Date().toISOString().slice(0, 10);
+
+// The history keeps only text. A note tells what the tool saved, so that Claude does not doubt it later.
+function turnNote(reply: ChatReply): string {
+  const saved = Object.entries(reply.labels)
+    .filter(([, value]) => value)
+    .map(([name, value]) => `${name}=${value}`)
+    .join(', ');
+  const note = saved ? `[saved: ${saved}]` : '';
+  return [reply.text, note].filter((part) => part !== '').join('\n') || '(no answer)';
+}
+
+/** The AI of the bot. It chats, analyzes data files with code, searches the web, and reads periods. It never touches the sheet. */
 @Injectable()
 export class ClaudeService {
   private readonly log = new Logger('Claude');
-  private readonly client = appEnv.anthropicKey ? new Anthropic({ apiKey: appEnv.anthropicKey }) : undefined;
+  private readonly client = createAnthropic();
 
-  private async askClaude(system: string, content: string): Promise<string | undefined> {
-    if (!this.client) return undefined;
+  constructor(
+    private readonly memory: MemoryService,
+    private readonly files: FileService,
+  ) {}
+
+  /** Forgets the talk and the data file of a chat. The last report stays. */
+  async forgetChat(chatId: number): Promise<void> {
+    this.memory.clearTurns(chatId);
+    await this.files.dropFile(chatId);
+  }
+
+  private contextOf(input: ChatInput): string {
+    return buildContext(input.facts, { lastReport: this.memory.loadReport(input.chatId), fileName: this.memory.loadFile(input.chatId)?.name });
+  }
+
+  // One request. If Claude pauses a long calculation, the loop sends its work back so that it can go on.
+  private async sendRequest(request: Request): Promise<ChatReply> {
+    const messages = [...request.messages];
+    for (let round = 0; round < MAX_ROUNDS; round += 1) {
+      const response = await this.client?.messages.create(
+        { model: MODEL_NAME, max_tokens: CHAT_TOKENS, system: request.system, tools: request.tools, messages },
+        { headers: { 'anthropic-beta': FILES_BETA } },
+      );
+      if (response?.stop_reason !== 'pause_turn') return readReply(response?.content ?? []);
+      messages.push({ role: 'assistant', content: response.content });
+    }
+    return { text: TOO_LONG_TEXT, labels: {} };
+  }
+
+  // The data file goes into the request only when the code sandbox is one of the tools.
+  private async askChat(input: ChatInput, tools: Anthropic.Messages.ToolUnion[]): Promise<ChatReply> {
+    const file = tools.includes(CODE_TOOL) ? this.memory.loadFile(input.chatId) : undefined;
+    return this.sendRequest({
+      system: `${ASSISTANT_PROMPT.replaceAll('{today}', todayText())}\n\nCONTEXT (facts of this chat)\n${this.contextOf(input)}`,
+      tools,
+      messages: [...pickRecent(this.memory.loadTurns(input.chatId)), { role: 'user', content: userContent(input.text, file) }],
+    });
+  }
+
+  // If a tool is not available, the bot steps down one level. The internet stays until the last level.
+  private async askWithFallback(input: ChatInput): Promise<ChatReply> {
+    let lastError: unknown;
+    for (const tools of TOOL_LEVELS) {
+      try {
+        return await this.askChat(input, tools);
+      } catch (error) {
+        lastError = error;
+        this.log.warn(`Chat with ${tools.length} tools failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    throw lastError;
+  }
+
+  /**
+   * Answers a message as a normal AI assistant. The context says what the chat has and the last report.
+   * If the chat has a data file, Claude can analyze it with code. The talk is saved on disk.
+   * If the user tells the period or the date, Claude saves them with the tool.
+   */
+  async talkToUser(input: ChatInput): Promise<ChatReply> {
+    if (!this.client) return { text: HELP_TEXT, labels: {} };
     try {
-      const response = await this.client.messages.create({
-        model: MODEL_NAME,
-        max_tokens: MAX_TOKENS,
-        system,
-        messages: [{ role: 'user', content }],
-      });
-      const block = response.content.find((part) => part.type === 'text');
-      return block && block.type === 'text' ? block.text : undefined;
+      const reply = await this.askWithFallback(input);
+      this.memory.addTurns(input.chatId, [
+        { role: 'user', content: input.text },
+        { role: 'assistant', content: turnNote(reply) },
+      ]);
+      return reply;
     } catch (error) {
-      this.log.error(`Claude request failed: ${error instanceof Error ? error.message : String(error)}`);
-      return undefined;
+      this.log.error(`Claude chat failed: ${error instanceof Error ? error.message : String(error)}`);
+      return { text: `${OFFLINE_TEXT}${HELP_TEXT}`, labels: {} };
     }
   }
 
-  /** Answers a free text message. Returns the help text if Claude is off or fails. */
-  async answerUser(text: string, status: string): Promise<string> {
-    const answer = await this.askClaude(SYSTEM_TEXT, `Status: ${status}\n\nMessage: ${text}`);
-    return answer ?? HELP_TEXT;
-  }
-
-  /** Reads the sales period and the stock date from a free text, for example "за октябрь". */
+  /** Reads the sales period and the stock date from a short text, for example the caption of a file. */
   async extractHints(text: string): Promise<Hints> {
-    const today = new Date().toISOString().slice(0, 10);
-    const answer = await this.askClaude(EXTRACT_TEXT.replace('{today}', today), text);
-    return answer ? parseHintsJson(answer) : {};
+    if (!this.client) return {};
+    try {
+      const response = await this.client.messages.create({
+        model: MODEL_NAME,
+        max_tokens: EXTRACT_TOKENS,
+        system: EXTRACT_TEXT.replace('{today}', todayText()),
+        messages: [{ role: 'user', content: text }],
+      });
+      const block = response.content.find((part) => part.type === 'text');
+      return block && block.type === 'text' ? parseHintsJson(block.text) : {};
+    } catch (error) {
+      this.log.error(`Claude extract failed: ${error instanceof Error ? error.message : String(error)}`);
+      return {};
+    }
   }
 }

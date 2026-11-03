@@ -6,6 +6,7 @@ import type { Context } from 'grammy';
 import type { ChatState } from './chatState';
 import type { IncomingFile } from './incomingFile';
 import type { RunInput } from '@/modules/agent';
+import type { ChatImage } from '@/modules/claude';
 
 import { appEnv } from '@/config/appEnv';
 import { AgentService } from '@/modules/agent';
@@ -15,6 +16,7 @@ import { classifyFile } from './classifyFile';
 import { describeState } from './describeState';
 import { hintsToState } from './hintsToState';
 import { isDataFile } from './isDataFile';
+import { documentImage } from './documentImage';
 import { isPureHint } from './isPureHint';
 import { splitMessage } from './splitMessage';
 import { stateFacts } from './stateFacts';
@@ -27,6 +29,10 @@ const TYPING_MS = 4000;
 const DATA_FILE_TEXT = 'Не принял файл «{name}». Я открываю таблицы и данные: .xlsx, .xls, .csv, .tsv, .txt, .json.';
 const OTHER_NOTE = '\n\n[Система: этот файл не похож на выгрузки 1С для таблицы (продажи или остатки), поэтому открыт для анализа.]';
 const OPEN_FAILED_TEXT = 'Не получилось открыть файл для анализа. Попробуй ещё раз чуть позже.';
+const BIG_IMAGE_TEXT = 'Картинка больше 5 МБ, я её не вижу. Пришли поменьше или как обычное фото.';
+const PHOTO_ASK = 'Я прислал картинку. Посмотри и коротко скажи, что на ней, и что с этим можно сделать.';
+// Claude takes a picture up to 5 MB.
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 const captionOf = (ctx: Context): string => ctx.message?.caption ?? '';
 
@@ -53,6 +59,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const bot = new Bot(appEnv.telegramToken);
     bot.use((ctx, next) => this.checkAccess(ctx, next));
     bot.command('forget', (ctx) => this.onForget(ctx));
+    bot.on('message:photo', (ctx) => this.onPhoto(ctx));
     bot.on('message:document', (ctx) => this.onDocument(ctx));
     bot.on('message:text', (ctx) => this.onText(ctx));
     bot.errorHandler = (failure) => this.log.error(`Update failed: ${failure.message}`);
@@ -130,8 +137,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     return { name, buffer: await this.downloadFile(ctx, document.file_id), caption: captionOf(ctx) };
   }
 
-  // A 1C file goes to the table, unless the caption asks for an analysis. Any other data file is analyzed.
+  // A picture sent as a file is shown to Claude. Any other file is read as data.
   private async onDocument(ctx: Context): Promise<void> {
+    const image = documentImage(ctx);
+    await (image ? this.showImage(ctx, image) : this.readDocument(ctx));
+  }
+
+  // A 1C file goes to the table, unless the caption asks for an analysis. Any other data file is analyzed.
+  private async readDocument(ctx: Context): Promise<void> {
     const file = await this.receiveFile(ctx);
     if (!file) return;
     const kind = await classifyFile(file.name, file.buffer);
@@ -142,6 +155,23 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     await this.analyzeFile(ctx, { file, stored, note: kind === 'other' ? OTHER_NOTE : '' });
+  }
+
+  // A photo in a chat is always a JPEG. The biggest size is the last one.
+  private async onPhoto(ctx: Context): Promise<void> {
+    const photo = ctx.message?.photo?.at(-1);
+    if (photo) await this.showImage(ctx, { fileId: photo.file_id, mediaType: 'image/jpeg' });
+  }
+
+  // The picture goes to Claude with the caption. It is not saved on the server or in the history.
+  private async showImage(ctx: Context, job: { fileId: string; mediaType: ChatImage['mediaType'] }): Promise<void> {
+    const buffer = await this.downloadFile(ctx, job.fileId);
+    if (buffer.length > MAX_IMAGE_BYTES) {
+      await ctx.reply(BIG_IMAGE_TEXT);
+      return;
+    }
+    const image = { mediaType: job.mediaType, base64: buffer.toString('base64') };
+    await this.talkToUser(ctx, { text: captionOf(ctx) || PHOTO_ASK, image }, this.stateFor(ctx));
   }
 
   private async addToTable(ctx: Context, kind: 'sales' | 'stock', file: IncomingFile): Promise<void> {
@@ -158,7 +188,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     const question = job.file.caption || defaultAsk(job.file.name);
-    await this.talkToUser(ctx, `${question}${job.note}`, this.stateFor(ctx));
+    await this.talkToUser(ctx, { text: `${question}${job.note}` }, this.stateFor(ctx));
   }
 
   private async onText(ctx: Context): Promise<void> {
@@ -170,13 +200,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       await this.runIfReady(ctx, state);
       return;
     }
-    await this.talkToUser(ctx, text, state);
+    await this.talkToUser(ctx, { text }, state);
   }
 
   // Any other text goes to Claude, as a talk with an AI. If the user tells a period or a date, the code uses it.
-  private async talkToUser(ctx: Context, text: string, state: ChatState): Promise<void> {
+  private async talkToUser(ctx: Context, message: { text: string; image?: ChatImage }, state: ChatState): Promise<void> {
     const chatId = ctx.chat?.id ?? 0;
-    const reply = await this.withTyping(ctx, () => this.claude.talkToUser({ chatId, text, facts: stateFacts(state) }));
+    const reply = await this.withTyping(ctx, () => this.claude.talkToUser({ chatId, ...message, facts: stateFacts(state) }));
     if (reply.text) await this.sendParts(ctx, reply.text);
     const labels = hintsToState(reply.labels);
     if (Object.keys(labels).length === 0) return;

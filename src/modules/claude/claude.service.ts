@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 
 import type Anthropic from '@anthropic-ai/sdk';
 import type { Hints } from '@/modules/report';
+import type { ChatImage } from './chatImage';
 import type { ChatReply } from './chatReply';
 
 import { MemoryService } from '@/modules/memory';
@@ -35,6 +36,8 @@ const HELP_TEXT = [
 
 const OFFLINE_TEXT = 'Сейчас я не могу подключиться к ИИ и отвечаю только по делу.\n';
 const TOO_LONG_TEXT = 'Расчёт занял слишком много времени. Попробуй спросить проще или по частям.';
+// The history keeps only text, so a note tells that a picture was in this message.
+const PHOTO_NOTE = '[the user sent a picture with this message; it is not in the history anymore]';
 const SKIPPED_TEXT = 'Не получилось поставить напоминание: время непонятно или уже прошло. Скажи, на когда его поставить.';
 
 // A reply of the code itself: no labels, no reminders.
@@ -49,7 +52,7 @@ Use null for a label that the message does not say. Do not guess.
 Answer with JSON only: {"period": string or null, "stockDate": string or null}`;
 
 /** One message of the user and the facts about the chat. */
-export type ChatInput = { chatId: number; text: string; facts: string };
+export type ChatInput = { chatId: number; text: string; facts: string; image?: ChatImage };
 type Request = { system: string; tools: Anthropic.Messages.ToolUnion[]; messages: Anthropic.Messages.MessageParam[] };
 
 // The tools of the code itself. They work at every level.
@@ -127,7 +130,7 @@ export class ClaudeService {
     return this.sendRequest({
       system: `${ASSISTANT_PROMPT.replaceAll('{today}', todayText()).replaceAll('{now}', clockText(Date.now()))}\n\nCONTEXT (facts of this chat)\n${this.contextOf(input)}`,
       tools,
-      messages: [...pickRecent(this.memory.loadTurns(input.chatId)), { role: 'user', content: userContent(input.text, file) }],
+      messages: [...pickRecent(this.memory.loadTurns(input.chatId)), { role: 'user', content: userContent(input.text, file, input.image) }],
     });
   }
 
@@ -155,7 +158,7 @@ export class ClaudeService {
     try {
       const reply = this.applyReminders(input.chatId, await this.askWithFallback(input));
       this.memory.addTurns(input.chatId, [
-        { role: 'user', content: input.text },
+        { role: 'user', content: input.image ? `${input.text}\n${PHOTO_NOTE}` : input.text },
         { role: 'assistant', content: turnNote(reply) },
       ]);
       return reply;

@@ -11,3 +11,4 @@ services:
     volumes:
       - ./google-key.json:/app/google-key.json:ro
       - ./data:/app/data
+      - ./knowledge:/app/knowledge:ro

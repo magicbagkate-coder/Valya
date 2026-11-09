@@ -29,5 +29,6 @@ export const appEnv = {
   googleKeyPath: readText('GOOGLE_KEY_PATH') ?? './google-key.json',
   sheetId: readText('SHEET_ID'),
   dataDir: readText('DATA_DIR') ?? './data',
+  knowledgeDir: readText('KNOWLEDGE_DIR') ?? './knowledge',
   allowedIds: readIds(),
 };

@@ -1,0 +1,1 @@
+export { readKnowledge } from './readKnowledge';

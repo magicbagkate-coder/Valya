@@ -5,6 +5,8 @@ import type { Hints } from '@/modules/report';
 import type { ChatImage } from './chatImage';
 import type { ChatReply } from './chatReply';
 
+import { appEnv } from '@/config/appEnv';
+import { readKnowledge } from '@/modules/knowledge';
 import { MemoryService } from '@/modules/memory';
 import { clockText, formatDue, ReminderService } from '@/modules/reminder';
 import { parseHintsJson } from '@/modules/report';
@@ -124,11 +126,19 @@ export class ClaudeService {
     return { text: TOO_LONG_TEXT, ...NO_ACTIONS };
   }
 
+  // The prompt, then the notes of the team (the knowledge folder), then the facts of this chat.
+  private systemText(input: ChatInput): string {
+    const prompt = ASSISTANT_PROMPT.replaceAll('{today}', todayText()).replaceAll('{now}', clockText(Date.now()));
+    const notes = readKnowledge(appEnv.knowledgeDir);
+    const base = notes ? `${prompt}\n\nKNOWLEDGE BASE (notes that the team gave you)\n${notes}` : prompt;
+    return `${base}\n\nCONTEXT (facts of this chat)\n${this.contextOf(input)}`;
+  }
+
   // The data file goes into the request only when the code sandbox is one of the tools.
   private async askChat(input: ChatInput, tools: Anthropic.Messages.ToolUnion[]): Promise<ChatReply> {
     const file = tools.includes(CODE_TOOL) ? this.memory.loadFile(input.chatId) : undefined;
     return this.sendRequest({
-      system: `${ASSISTANT_PROMPT.replaceAll('{today}', todayText()).replaceAll('{now}', clockText(Date.now()))}\n\nCONTEXT (facts of this chat)\n${this.contextOf(input)}`,
+      system: this.systemText(input),
       tools,
       messages: [...pickRecent(this.memory.loadTurns(input.chatId)), { role: 'user', content: userContent(input.text, file, input.image) }],
     });

@@ -16,14 +16,17 @@ function toFile(value: unknown): StoredFile | undefined {
   return typeof id === 'string' && typeof name === 'string' ? { id, name } : undefined;
 }
 
+const toText = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined);
+
 function toMemory(value: unknown): ChatMemory {
   if (typeof value !== 'object' || value === null) return { turns: [] };
   const turns = Reflect.get(value, 'turns');
-  const report = Reflect.get(value, 'lastReport');
   return {
     turns: Array.isArray(turns) ? turns.flatMap(toTurns) : [],
-    lastReport: typeof report === 'string' ? report : undefined,
+    lastReport: toText(Reflect.get(value, 'lastReport')),
     file: toFile(Reflect.get(value, 'file')),
+    analysis: toText(Reflect.get(value, 'analysis')),
+    analysisDate: toText(Reflect.get(value, 'analysisDate')),
   };
 }
 

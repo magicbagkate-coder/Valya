@@ -22,6 +22,15 @@ function readIds(): number[] {
     .filter((id) => Number.isInteger(id) && id > 0);
 }
 
+// The chats that get the weekly analysis. A group chat id is negative. An empty list means all chats that talk with the bot.
+function readChatIds(): number[] {
+  const list = readText('ANALYSIS_CHAT_IDS') ?? '';
+  return list
+    .split(',')
+    .map((part) => Number(part.trim()))
+    .filter((id) => Number.isInteger(id) && id !== 0);
+}
+
 export const appEnv = {
   port: readPort(),
   telegramToken: readText('TELEGRAM_BOT_TOKEN'),
@@ -31,4 +40,5 @@ export const appEnv = {
   dataDir: readText('DATA_DIR') ?? './data',
   knowledgeDir: readText('KNOWLEDGE_DIR') ?? './knowledge',
   allowedIds: readIds(),
+  analysisChatIds: readChatIds(),
 };

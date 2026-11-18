@@ -3,6 +3,7 @@ import type { ChatReply } from './chatReply';
 
 import { readCancelId, readReminder } from '@/modules/reminder';
 import { cleanLabels } from '@/modules/report';
+import { ANALYZE_TOOL } from './analysisTool';
 import { LABEL_TOOL } from './labelTool';
 import { CANCEL_TOOL, REMINDER_TOOL } from './reminderTool';
 
@@ -23,5 +24,6 @@ export function readReply(content: Anthropic.Messages.ContentBlock[], now: numbe
     const id = readCancelId(input);
     return id === undefined ? [] : [id];
   });
-  return { text, labels: Object.assign({}, ...labels), reminders, cancels, skipped: calls.length - reminders.length };
+  const analyze = toolInputs(content, ANALYZE_TOOL.name).length > 0;
+  return { text, labels: Object.assign({}, ...labels), reminders, cancels, skipped: calls.length - reminders.length, analyze, report: '' };
 }

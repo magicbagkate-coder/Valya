@@ -74,6 +74,28 @@ export class MemoryService {
     this.writeFile();
   }
 
+  /** Returns the last analysis of the table that was sent to a chat. */
+  loadAnalysis(chatId: number): string | undefined {
+    return this.chats.get(chatId)?.analysis;
+  }
+
+  /** Returns the day when the weekly analysis was last sent to a chat, for example "2026-11-18". */
+  loadAnalysisDate(chatId: number): string | undefined {
+    return this.chats.get(chatId)?.analysisDate;
+  }
+
+  /** Saves the last analysis of a chat. With a date, it also saves the day of the weekly send. */
+  saveAnalysis(job: { chatId: number; text: string; date?: string }): void {
+    const old = this.chats.get(job.chatId);
+    this.chats.set(job.chatId, { turns: [], ...old, analysis: job.text, analysisDate: job.date ?? old?.analysisDate });
+    this.writeFile();
+  }
+
+  /** Lists the chats that have a talk with the bot. */
+  listChats(): number[] {
+    return [...this.chats.entries()].flatMap(([chatId, memory]) => (memory.turns.length > 0 ? [chatId] : []));
+  }
+
   /** Saves the last report of a chat. */
   saveReport(chatId: number, report: string): void {
     this.chats.set(chatId, { turns: [], ...this.chats.get(chatId), lastReport: report });

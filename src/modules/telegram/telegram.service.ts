@@ -208,6 +208,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const chatId = ctx.chat?.id ?? 0;
     const reply = await this.withTyping(ctx, () => this.claude.talkToUser({ chatId, ...message, facts: stateFacts(state) }));
     if (reply.text) await this.sendParts(ctx, reply.text);
+    if (reply.report) await this.sendParts(ctx, reply.report);
     const labels = hintsToState(reply.labels);
     if (Object.keys(labels).length === 0) return;
     Object.assign(state, labels);

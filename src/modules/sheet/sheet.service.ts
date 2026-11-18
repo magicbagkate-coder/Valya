@@ -1,12 +1,14 @@
 import { Injectable } from '@nestjs/common';
 
 import type { PlanResult, ReportColumns, TableRow } from '@/modules/report';
+import type { GridRow } from './gridRow';
 import type { SheetSnapshot } from './sheetSnapshot';
 
 import { appEnv } from '@/config/appEnv';
 import { normalizeArticle } from '@/modules/report';
 import { buildCells } from './buildCells';
 import { columnLetter } from './columnLetter';
+import { toGridRow } from './gridRow';
 import { samePeriod } from './samePeriod';
 import { SHEET_TITLE } from './sheetTitle';
 import { createSheetClient } from './sheetClient';
@@ -31,6 +33,17 @@ export class SheetService {
     const sheetId = sheet?.properties?.sheetId;
     if (typeof sheetId !== 'number') throw new Error(`The sheet "${SHEET_TITLE}" is not in the table.`);
     return sheetId;
+  }
+
+  /** Reads the whole sheet "отчет": the text of each cell and the color of each row. It changes nothing. */
+  async readGrid(): Promise<GridRow[]> {
+    const response = await this.client.spreadsheets.get({
+      spreadsheetId: this.requireSheetId(),
+      ranges: [`'${SHEET_TITLE}'`],
+      includeGridData: true,
+      fields: 'sheets.data.rowData.values(formattedValue,effectiveFormat.backgroundColor)',
+    });
+    return (response.data.sheets?.[0]?.data?.[0]?.rowData ?? []).map((row) => toGridRow(row));
   }
 
   private async readHeaders(spreadsheetId: string): Promise<string[]> {

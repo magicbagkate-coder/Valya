@@ -8,8 +8,9 @@ import type { ChatReply } from './chatReply';
 import { appEnv } from '@/config/appEnv';
 import { readKnowledge } from '@/modules/knowledge';
 import { MemoryService } from '@/modules/memory';
-import { clockText, formatDue, ReminderService } from '@/modules/reminder';
+import { clockText } from '@/modules/reminder';
 import { parseHintsJson } from '@/modules/report';
+import { ANALYZE_TOOL } from './analysisTool';
 import { createAnthropic } from './anthropicClient';
 import { buildContext } from './buildContext';
 import { FileService } from './file.service';
@@ -20,6 +21,7 @@ import { LABEL_TOOL } from './labelTool';
 import { pickRecent } from './pickRecent';
 import { readReply } from './readReply';
 import { CANCEL_TOOL, REMINDER_TOOL } from './reminderTool';
+import { ReplyActions } from './replyActions';
 import { userContent } from './userContent';
 import { WEB_SEARCH_TOOL } from './webSearchTool';
 
@@ -40,10 +42,9 @@ const OFFLINE_TEXT = 'Сейчас я не могу подключиться к 
 const TOO_LONG_TEXT = 'Расчёт занял слишком много времени. Попробуй спросить проще или по частям.';
 // The history keeps only text, so a note tells that a picture was in this message.
 const PHOTO_NOTE = '[the user sent a picture with this message; it is not in the history anymore]';
-const SKIPPED_TEXT = 'Не получилось поставить напоминание: время непонятно или уже прошло. Скажи, на когда его поставить.';
 
-// A reply of the code itself: no labels, no reminders.
-const NO_ACTIONS = { labels: {}, reminders: [], cancels: [], skipped: 0 };
+// A reply of the code itself: no labels, no reminders, no analysis.
+const NO_ACTIONS = { labels: {}, reminders: [], cancels: [], skipped: 0, analyze: false, report: '' };
 
 const EXTRACT_TEXT = `Extract two labels from a Russian message of a shop employee.
 "period" is the sales period. "stockDate" is the date of the stock (остатки).
@@ -58,7 +59,7 @@ export type ChatInput = { chatId: number; text: string; facts: string; image?: C
 type Request = { system: string; tools: Anthropic.Messages.ToolUnion[]; messages: Anthropic.Messages.MessageParam[] };
 
 // The tools of the code itself. They work at every level.
-const BASE_TOOLS: Anthropic.Messages.ToolUnion[] = [LABEL_TOOL, REMINDER_TOOL, CANCEL_TOOL];
+const BASE_TOOLS: Anthropic.Messages.ToolUnion[] = [LABEL_TOOL, REMINDER_TOOL, CANCEL_TOOL, ANALYZE_TOOL];
 
 // From the most to the least. 1) all: base tools, internet, code sandbox. 2) base tools and internet. 3) base tools only.
 const TOOL_LEVELS: Anthropic.Messages.ToolUnion[][] = [[...BASE_TOOLS, WEB_SEARCH_TOOL, CODE_TOOL], [...BASE_TOOLS, WEB_SEARCH_TOOL], BASE_TOOLS];
@@ -72,7 +73,8 @@ function turnNote(reply: ChatReply): string {
     .map(([name, value]) => `${name}=${value}`)
     .join(', ');
   const note = saved ? `[saved: ${saved}]` : '';
-  return [reply.text, note].filter((part) => part !== '').join('\n') || '(no answer)';
+  const sent = reply.report ? '[the code sent the table analysis to the chat]' : '';
+  return [reply.text, note, sent].filter((part) => part !== '').join('\n') || '(no answer)';
 }
 
 /** The AI of the bot. It chats, analyzes data files with code, searches the web, and reads periods. It never touches the sheet. */
@@ -84,7 +86,7 @@ export class ClaudeService {
   constructor(
     private readonly memory: MemoryService,
     private readonly files: FileService,
-    private readonly reminders: ReminderService,
+    private readonly actions: ReplyActions,
   ) {}
 
   /** Forgets the talk and the data file of a chat. The last report stays. */
@@ -94,22 +96,12 @@ export class ClaudeService {
   }
 
   private contextOf(input: ChatInput): string {
-    const pending = this.reminders.listFor(input.chatId).map((item) => `№${item.id} ${formatDue(item.dueAt)} — ${item.text}`);
-    return buildContext(input.facts, { lastReport: this.memory.loadReport(input.chatId), fileName: this.memory.loadFile(input.chatId)?.name, reminders: pending });
-  }
-
-  // The code does what Claude asked: it cancels and sets the reminders, then adds the exact result to the answer.
-  private applyReminders(chatId: number, reply: ChatReply): ChatReply {
-    const cancelled = reply.cancels.map((id) =>
-      this.reminders.cancelReminder({ chatId, id }) ? `Напоминание №${id} отменено.` : `Напоминания №${id} нет.`,
-    );
-    const set = reply.reminders.map((request) => {
-      const item = this.reminders.addReminder({ chatId, ...request });
-      return `⏰ Напомню ${formatDue(item.dueAt)}: ${item.text} (№${item.id}).`;
+    return buildContext(input.facts, {
+      lastReport: this.memory.loadReport(input.chatId),
+      lastAnalysis: this.memory.loadAnalysis(input.chatId),
+      fileName: this.memory.loadFile(input.chatId)?.name,
+      reminders: this.actions.pendingLines(input.chatId),
     });
-    const failed = reply.skipped > 0 ? [SKIPPED_TEXT] : [];
-    const notes = [...cancelled, ...set, ...failed].join('\n');
-    return { ...reply, text: [reply.text, notes].filter((part) => part !== '').join('\n\n') };
   }
 
   // One request. If Claude pauses a long calculation, the loop sends its work back so that it can go on.
@@ -166,7 +158,7 @@ export class ClaudeService {
   async talkToUser(input: ChatInput): Promise<ChatReply> {
     if (!this.client) return { text: HELP_TEXT, ...NO_ACTIONS };
     try {
-      const reply = this.applyReminders(input.chatId, await this.askWithFallback(input));
+      const reply = await this.actions.applyActions(input.chatId, await this.askWithFallback(input));
       this.memory.addTurns(input.chatId, [
         { role: 'user', content: input.image ? `${input.text}\n${PHOTO_NOTE}` : input.text },
         { role: 'assistant', content: turnNote(reply) },

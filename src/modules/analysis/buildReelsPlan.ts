@@ -5,7 +5,7 @@ import { PLAN_ITEM_MAX, PLAN_TOTAL } from './analysisRules';
 
 // What sells better goes first. If two products sell the same, the one with fewer published Reels goes first. Then the bigger stock.
 const byPriority = (first: AnalysisRow, second: AnalysisRow): number =>
-  second.soldTwo - first.soldTwo || first.reels - second.reels || second.stock - first.stock || first.line - second.line;
+  second.sold - first.sold || first.reels - second.reels || second.stock - first.stock || first.line - second.line;
 
 /**
  * Splits the Reels of the next week over the products that are given (the main assortment that is in stock).
@@ -24,6 +24,6 @@ export function buildReelsPlan(rows: AnalysisRow[]): PlanItem[] {
   }
   return ranked.flatMap((row, index) => {
     const count = counts[index] ?? 0;
-    return count > 0 ? [{ line: row.line, article: row.article, count, soldTwo: row.soldTwo, stock: row.stock, reels: row.reels }] : [];
+    return count > 0 ? [{ line: row.line, article: row.article, count, sold: row.sold, stock: row.stock, reels: row.reels }] : [];
   });
 }

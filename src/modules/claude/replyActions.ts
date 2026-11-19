@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
+import type { AnalysisPeriod } from '@/modules/analysis';
 import type { ChatReply } from './chatReply';
 
 import { AnalysisService } from '@/modules/analysis';
@@ -34,9 +35,10 @@ export class ReplyActions {
   }
 
   // The report is saved for the chat, so that Claude can answer questions about it later.
-  private async runAnalysis(chatId: number): Promise<string> {
+  private async runAnalysis(job: { chatId: number; period: AnalysisPeriod }): Promise<string> {
+    const { chatId } = job;
     try {
-      const text = await this.analysis.buildReport();
+      const text = await this.analysis.buildReport(job.period);
       this.memory.saveAnalysis({ chatId, text });
       return text;
     } catch (error) {
@@ -47,7 +49,7 @@ export class ReplyActions {
   /** Sets and cancels the reminders, adds the exact result to the answer, and runs the analysis if Claude asked for it. */
   async applyActions(chatId: number, reply: ChatReply): Promise<ChatReply> {
     const notes = this.reminderNotes(chatId, reply).join('\n');
-    const report = reply.analyze ? await this.runAnalysis(chatId) : '';
+    const report = reply.analyze ? await this.runAnalysis({ chatId, period: reply.analyze }) : '';
     return { ...reply, text: [reply.text, notes].filter((part) => part !== '').join('\n\n'), report };
   }
 }

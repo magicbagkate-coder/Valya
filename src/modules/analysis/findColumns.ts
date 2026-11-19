@@ -19,6 +19,7 @@ export function findColumns(headers: string[]): TableColumns {
   if (reelsFrom < 0) throw new Error('В шапке таблицы нет колонки «ДАТА ВЫЛОЖЕННОГО КОНТЕНТА».');
   const postsFrom = names.findIndex((name, index) => index > reelsFrom && name.includes('ПОСТОВ'));
   return {
+    salesFrom: firstSales,
     lastWeek: stock - 1,
     prevWeek: stock - 2 >= firstSales ? stock - 2 : -1,
     stock,

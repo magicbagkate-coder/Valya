@@ -1,9 +1,13 @@
 import type { GridRow } from '@/modules/sheet';
 import type { AnalysisRow } from './analysisRow';
 import type { AnalysisTable } from './analysisTable';
+import type { DayRange } from './dates';
+import type { SalesPick } from './salesPick';
 import type { TableColumns } from './tableColumns';
 
+import { reelDay } from './dates';
 import { findColumns } from './findColumns';
+import { pickSales } from './pickSales';
 import { rowGroup } from './rowGroup';
 import { toNumber } from './toNumber';
 
@@ -11,17 +15,24 @@ import { toNumber } from './toNumber';
 const ARTICLE_INDEX = 3;
 const FIRST_LINE = 2;
 
+type RowJob = { row: GridRow; line: number; columns: TableColumns; pick: SalesPick; today: number; window?: DayRange };
+
 const cellAt = (cells: string[], index: number): string => cells[index] ?? '';
 
-function toRow(job: { row: GridRow; line: number; columns: TableColumns }): AnalysisRow[] {
+// Reels published inside the time frame. A cell without a readable date is not counted there.
+function countInWindow(job: { reels: string[]; today: number; window: DayRange }): number {
+  return job.reels.filter((cell) => {
+    const day = reelDay(cell, job.today);
+    return day !== undefined && day >= job.window.from && day <= job.window.to;
+  }).length;
+}
+
+function toRow(job: RowJob): AnalysisRow[] {
   const { cells } = job.row;
-  const { columns } = job;
   const article = cellAt(cells, ARTICLE_INDEX).trim();
   if (article === '') return [];
-  const soldLast = toNumber(cellAt(cells, columns.lastWeek));
-  const soldBefore = columns.prevWeek >= 0 ? toNumber(cellAt(cells, columns.prevWeek)) : 0;
   const reels = cells
-    .slice(columns.reelsFrom, columns.reelsTo)
+    .slice(job.columns.reelsFrom, job.columns.reelsTo)
     .map((cell) => cell.trim())
     .filter((cell) => cell !== '');
   return [
@@ -29,24 +40,31 @@ function toRow(job: { row: GridRow; line: number; columns: TableColumns }): Anal
       line: job.line,
       article,
       group: rowGroup(job.row),
-      soldLast,
-      soldTwo: soldLast + soldBefore,
-      stock: toNumber(cellAt(cells, columns.stock)),
+      sold: job.pick.indexes.reduce((total, index) => total + toNumber(cellAt(cells, index)), 0),
+      stock: toNumber(cellAt(cells, job.columns.stock)),
       reels: reels.length,
+      periodReels: job.window ? countInWindow({ reels, today: job.today, window: job.window }) : reels.length,
       lastReel: reels.at(-1) ?? '',
     },
   ];
 }
 
-/** Reads the grid of the sheet "отчет" into product rows. Each filled cell of the content block is one published Reels. */
-export function readAnalysisRows(grid: GridRow[]): AnalysisTable {
-  const headers = grid[0]?.cells ?? [];
+/**
+ * Reads the grid of the sheet "отчет" into product rows. Each filled cell of the content block is one published Reels.
+ * With a window (a time frame), the sales columns and the Reels are counted for that frame. Today is a day number.
+ */
+export function readAnalysisRows(job: { grid: GridRow[]; today: number; window?: DayRange }): AnalysisTable {
+  const headers = job.grid[0]?.cells ?? [];
   const columns = findColumns(headers);
-  const rows = grid.slice(1).flatMap((row, index) => toRow({ row, line: index + FIRST_LINE, columns }));
+  const pick = pickSales({ headers, columns, today: job.today, window: job.window });
+  const rows = job.grid.slice(1).flatMap((row, index) => toRow({ row, line: index + FIRST_LINE, columns, pick, today: job.today, window: job.window }));
   return {
     rows,
-    lastWeekLabel: cellAt(headers, columns.lastWeek).trim(),
-    prevWeekLabel: columns.prevWeek >= 0 ? cellAt(headers, columns.prevWeek).trim() : '',
     stockLabel: cellAt(headers, columns.stock).trim(),
+    periodText: pick.periodText,
+    notes: pick.notes,
+    hasSales: pick.hasSales,
+    weakMax: pick.weakMax,
+    windowed: job.window !== undefined,
   };
 }

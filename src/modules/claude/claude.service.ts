@@ -44,7 +44,7 @@ const TOO_LONG_TEXT = 'Расчёт занял слишком много вре�
 const PHOTO_NOTE = '[the user sent a picture with this message; it is not in the history anymore]';
 
 // A reply of the code itself: no labels, no reminders, no analysis.
-const NO_ACTIONS = { labels: {}, reminders: [], cancels: [], skipped: 0, analyze: false, report: '' };
+const NO_ACTIONS = { labels: {}, reminders: [], cancels: [], skipped: 0, analyze: undefined, report: '' };
 
 const EXTRACT_TEXT = `Extract two labels from a Russian message of a shop employee.
 "period" is the sales period. "stockDate" is the date of the stock (остатки).

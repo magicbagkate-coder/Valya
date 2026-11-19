@@ -18,6 +18,7 @@ import { ASSISTANT_PROMPT } from './assistantPrompt';
 import { CODE_TOOL } from './codeTool';
 import { FILES_BETA } from './filesBeta';
 import { LABEL_TOOL } from './labelTool';
+import { MODEL_NAME } from './modelName';
 import { pickRecent } from './pickRecent';
 import { readReply } from './readReply';
 import { CANCEL_TOOL, REMINDER_TOOL } from './reminderTool';
@@ -25,7 +26,6 @@ import { ReplyActions } from './replyActions';
 import { userContent } from './userContent';
 import { WEB_SEARCH_TOOL } from './webSearchTool';
 
-const MODEL_NAME = 'claude-sonnet-5-5';
 const CHAT_TOKENS = 3000;
 const EXTRACT_TOKENS = 300;
 // A long calculation can pause the answer. The bot then asks Claude to go on, up to this many times.

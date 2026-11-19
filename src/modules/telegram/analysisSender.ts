@@ -2,9 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Api } from 'grammy';
 
 import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import type { FullReport } from '@/modules/claude';
 
 import { appEnv } from '@/config/appEnv';
-import { AnalysisService, dueReportDate } from '@/modules/analysis';
+import { dueReportDate } from '@/modules/analysis';
+import { contextReport, displayReport, TableAdvisor } from '@/modules/claude';
 import { MemoryService } from '@/modules/memory';
 import { clockText } from '@/modules/reminder';
 import { splitMessage } from './splitMessage';
@@ -12,7 +14,7 @@ import { splitMessage } from './splitMessage';
 // How often the bot looks at the clock.
 const TICK_MS = 60_000;
 
-/** Sends the analysis of the table to the team chat every Wednesday at 09:00 Kyiv time. Each chat gets it once a day. */
+/** Sends the analysis of the table, with the conclusions of Claude, to the team chat every Wednesday at 09:00 Kyiv time. Each chat gets it once a day. */
 @Injectable()
 export class AnalysisSender implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('AnalysisSender');
@@ -20,7 +22,7 @@ export class AnalysisSender implements OnModuleInit, OnModuleDestroy {
   private sending = false;
 
   constructor(
-    private readonly analysis: AnalysisService,
+    private readonly advisor: TableAdvisor,
     private readonly memory: MemoryService,
   ) {}
 
@@ -39,10 +41,10 @@ export class AnalysisSender implements OnModuleInit, OnModuleDestroy {
     return appEnv.analysisChatIds.length > 0 ? appEnv.analysisChatIds : this.memory.listChats();
   }
 
-  private async sendToChat(job: { api: Api; chatId: number; text: string; date: string }): Promise<void> {
+  private async sendToChat(job: { api: Api; chatId: number; full: FullReport; date: string }): Promise<void> {
     try {
-      for (const part of splitMessage(job.text)) await job.api.sendMessage(job.chatId, part);
-      this.memory.saveAnalysis({ chatId: job.chatId, text: job.text, date: job.date });
+      for (const part of splitMessage(displayReport(job.full))) await job.api.sendMessage(job.chatId, part);
+      this.memory.saveAnalysis({ chatId: job.chatId, text: contextReport(job.full), date: job.date });
     } catch (error) {
       this.log.warn(`The analysis was not sent to chat ${job.chatId}: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -56,8 +58,8 @@ export class AnalysisSender implements OnModuleInit, OnModuleDestroy {
     if (waiting.length === 0) return;
     this.sending = true;
     try {
-      const text = await this.analysis.buildReport();
-      for (const chatId of waiting) await this.sendToChat({ api, chatId, text, date });
+      const full = await this.advisor.buildFullReport();
+      for (const chatId of waiting) await this.sendToChat({ api, chatId, full, date });
     } catch (error) {
       this.log.warn(`The weekly analysis failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {

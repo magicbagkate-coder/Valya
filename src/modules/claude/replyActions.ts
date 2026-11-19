@@ -3,9 +3,10 @@ import { Injectable } from '@nestjs/common';
 import type { AnalysisPeriod } from '@/modules/analysis';
 import type { ChatReply } from './chatReply';
 
-import { AnalysisService } from '@/modules/analysis';
 import { MemoryService } from '@/modules/memory';
 import { formatDue, ReminderService } from '@/modules/reminder';
+import { contextReport, displayReport } from './fullReport';
+import { TableAdvisor } from './tableAdvisor';
 
 const SKIPPED_TEXT = 'Не получилось поставить напоминание: время непонятно или уже прошло. Скажи, на когда его поставить.';
 
@@ -14,7 +15,7 @@ const SKIPPED_TEXT = 'Не получилось поставить напоми�
 export class ReplyActions {
   constructor(
     private readonly reminders: ReminderService,
-    private readonly analysis: AnalysisService,
+    private readonly advisor: TableAdvisor,
     private readonly memory: MemoryService,
   ) {}
 
@@ -34,13 +35,13 @@ export class ReplyActions {
     return [...cancelled, ...set, ...(reply.skipped > 0 ? [SKIPPED_TEXT] : [])];
   }
 
-  // The report is saved for the chat, so that Claude can answer questions about it later.
+  // The report and the conclusions are saved for the chat, so that Claude can answer questions about them later.
   private async runAnalysis(job: { chatId: number; period: AnalysisPeriod }): Promise<string> {
     const { chatId } = job;
     try {
-      const text = await this.analysis.buildReport(job.period);
-      this.memory.saveAnalysis({ chatId, text });
-      return text;
+      const full = await this.advisor.buildFullReport(job.period);
+      this.memory.saveAnalysis({ chatId, text: contextReport(full) });
+      return displayReport(full);
     } catch (error) {
       return `Не получилось проанализировать таблицу: ${error instanceof Error ? error.message : String(error)}`;
     }

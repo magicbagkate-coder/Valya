@@ -6,7 +6,7 @@ Stack: Node.js, NestJS, TypeScript. No database. Settings come from `.env` throu
 A Telegram bot takes two 1C Excel files (sales, stock) and writes them to the sheet "отчет" of a Google table. The full spec is the instruction file of the user (agent-sales-stock-instructions.md). Code does the matching and writing. Claude (API) only chats. Rows that the agent cannot match are left alone and listed in the report. A missing article is not an error: skip it.
 - `src/modules/report` - parse files, match articles, build the plan, format the report (pure code, has tests).
 - `src/modules/sheet` - Google Sheets read and write.
-- `src/modules/analysis` - analysis of the sheet "отчет" by row colors (yellow and red = promo, all other = main assortment): sales, stock, published Reels, discount candidates, plan of 70 Reels. Pure code with tests. The weekly send is on Wednesday at 09:00 Kyiv time.
+- `src/modules/analysis` - analysis of the sheet "отчет" by row colors (yellow and red = promo, all other = main assortment): sales, stock, published Reels, discount candidates, plan of 70 Reels. Pure code with tests. The analysis can take a time frame (Reels by date, sales by weekly columns). The weekly send is on Wednesday at 09:00 Kyiv time. After the numbers, `claude/tableAdvisor.ts` asks Claude for conclusions and recommendations from the exact report.
 - `src/modules/telegram`, `claude`, `agent` - bot, chat, and the run.
 - Secrets are in `.env` and `google-key.json` (never commit).
 

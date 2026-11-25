@@ -5,7 +5,7 @@ import { readCancelId, readReminder } from '@/modules/reminder';
 import { cleanLabels } from '@/modules/report';
 import { ANALYZE_TOOL } from './analysisTool';
 import { LABEL_TOOL } from './labelTool';
-import { readPeriod } from './readPeriod';
+import { readAnalyzeRequest } from './readAnalyzeRequest';
 import { CANCEL_TOOL, REMINDER_TOOL } from './reminderTool';
 
 function toolInputs(content: Anthropic.Messages.ContentBlock[], toolName: string): unknown[] {
@@ -26,6 +26,6 @@ export function readReply(content: Anthropic.Messages.ContentBlock[], now: numbe
     return id === undefined ? [] : [id];
   });
   const asked = toolInputs(content, ANALYZE_TOOL.name);
-  const analyze = asked.length > 0 ? readPeriod(asked[0]) : undefined;
+  const analyze = asked.length > 0 ? readAnalyzeRequest(asked[0]) : undefined;
   return { text, labels: Object.assign({}, ...labels), reminders, cancels, skipped: calls.length - reminders.length, analyze, report: '' };
 }

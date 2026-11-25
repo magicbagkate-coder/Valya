@@ -1,5 +1,6 @@
 import type { AnalysisResult } from './analysisResult';
 import type { AnalysisRow } from './analysisRow';
+import type { ColorPlan } from './colorPlan';
 import type { GroupReport } from './groupReport';
 import type { PlanItem } from './planItem';
 
@@ -62,15 +63,28 @@ function mainLines(job: { group: GroupReport; style: Style }): string[] {
   const { group, style } = job;
   const toLine = reelsLineFor(style);
   const head = [`ОСНОВНОЙ АССОРТИМЕНТ (все остальные цвета): ${group.items} позиций`];
-  const note = 'Плана Reels в таблице нет, поэтому «запланировано» и «не опубликовано» я не считаю.';
-  if (!style.hasSales) return [...head, `Остаток сейчас: ${group.stock} шт.`, ...reelsTotalLines(job), note, NO_SALES_LINE];
+  if (!style.hasSales) return [...head, `Остаток сейчас: ${group.stock} шт.`, ...reelsTotalLines(job), NO_SALES_LINE];
   return [
     ...head,
     totalsLine(group),
     ...reelsTotalLines(job),
-    note,
     ...listLines({ title: `Хорошо продаются (больше ${style.weakMax} шт за период)`, rows: group.best, toLine, limit: LIST_SIZE }),
     ...listLines({ title: `Продаются плохо (${weakText(style.weakMax)}, остаток есть), больше всего на складе`, rows: group.weak, toLine, limit: LIST_SIZE }),
+  ];
+}
+
+const unshotLine = (row: AnalysisRow): string => `• ${row.article} (стр. ${row.line}): остаток ${row.stock}, Reels всего ${row.reels}${row.lastReel ? `, последний ${row.lastReel}` : ''}`;
+
+// What the colors mark as planned for the content, and how much of it was shot in the period.
+function colorPlanLines(plan: ColorPlan): string[] {
+  const title = 'ЗАПЛАНИРОВАНО В КОНТЕНТ (цветные строки основного ассортимента, без жёлтых и красных)';
+  if (plan.planned === 0) return [`${title}: цветных строк нет, плана по цветам в таблице не вижу.`];
+  return [
+    `${title}: ${plan.planned} позиций`,
+    `Период съёмки: ${plan.shotText}.`,
+    `Снято (есть Reels с датой в этом периоде): ${plan.shot} позиций, всего Reels ${plan.shotReels}.`,
+    `Осталось не снято: ${plan.unshot.length} позиций.`,
+    ...listLines({ title: 'Не снято, больше всего на складе', rows: plan.unshot, toLine: unshotLine, limit: LIST_SIZE }),
   ];
 }
 
@@ -94,6 +108,7 @@ const RULES_LINES = [
   'КАК Я СЧИТАЮ',
   '• Цвет строки: жёлтый и красный это акция, все остальные цвета это основной ассортимент. Они считаются отдельно.',
   '• Продано беру из колонок продаж (они записаны по неделям), остаток из колонки «остаток», это остаток на дату последней записи.',
+  '• «Запланировано в контент» это цветные строки основного ассортимента (любой цвет, кроме белого, жёлтого и красного). «Снято» значит, что в блоке дат у строки есть Reels с датой в периоде съёмки. Если период не назван, это последние 7 дней.',
   '• Reels: каждая заполненная ячейка в блоке «ДАТА ВЫЛОЖЕННОГО КОНТЕНТА» это один опубликованный Reels. Колонки постов не считаю.',
   '• В план идут товары основного ассортимента, которые есть в наличии, кроме кандидатов на скидку. Сначала те, что лучше продаются, при равенстве те, где меньше Reels, потом где больше остаток. Не больше 3 Reels на товар.',
 ];
@@ -107,6 +122,7 @@ export function formatAnalysis(result: AnalysisResult): string {
   const style = { hasSales: result.hasSales, weakMax: result.weakMax, windowed: result.windowed };
   return [
     headerLines(result),
+    colorPlanLines(result.colorPlan),
     promoLines({ group: result.promo, style }),
     mainLines({ group: result.main, style }),
     candidateLines(result),

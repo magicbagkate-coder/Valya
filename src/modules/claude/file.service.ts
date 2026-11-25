@@ -1,17 +1,23 @@
 import { toFile } from '@anthropic-ai/sdk';
 import { Injectable, Logger } from '@nestjs/common';
 
+import type { TableAccess } from './tableAccess';
+
 import { MemoryService } from '@/modules/memory';
 import { createAnthropic } from './anthropicClient';
 import { FILES_BETA } from './filesBeta';
+import { TableFilesService } from './tableFiles.service';
 
-/** Keeps the last data file of each chat in the Anthropic file storage, so Claude can analyze it in the code sandbox. */
+/** Keeps the files for the code sandbox of Claude: the last data file of each chat, and the copy of the Google table. */
 @Injectable()
 export class FileService {
   private readonly log = new Logger('Files');
   private readonly client = createAnthropic();
 
-  constructor(private readonly memory: MemoryService) {}
+  constructor(
+    private readonly memory: MemoryService,
+    private readonly tables: TableFilesService,
+  ) {}
 
   /** Uploads a data file and makes it the file of the chat. The old file is deleted. Returns false if it fails. */
   async storeFile(chatId: number, name: string, buffer: Buffer): Promise<boolean> {
@@ -37,5 +43,10 @@ export class FileService {
       this.log.warn(`Old file was not deleted: ${error instanceof Error ? error.message : String(error)}`);
     }
     this.memory.saveFile(chatId, undefined);
+  }
+
+  /** The fresh copy of the whole Google table for the code sandbox, with a note about it. */
+  async freshTable(): Promise<TableAccess> {
+    return this.tables.freshTable();
   }
 }

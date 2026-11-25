@@ -57,7 +57,7 @@ describe('readAnalysisRows without a time frame', () => {
     const grid = [headerRow, makeRow({ article: 'A1', color: WHITE_COLOR, sales: ['1', '2'], stock: '7', reels: ['02.10', '23.10 сборн'], post: '10.03' }), makeRow({ article: '', color: WHITE_COLOR, sales: ['', ''], stock: '', reels: [] })];
     const table = readAnalysisRows({ grid, today: TEST_DAY });
     assert.equal(table.rows.length, 1);
-    assert.deepEqual(table.rows[0], { line: 2, article: 'A1', group: 'main', sold: 3, stock: 7, reels: 2, periodReels: 2, lastReel: '23.10 сборн' });
+    assert.deepEqual(table.rows[0], { line: 2, article: 'A1', group: 'main', planned: false, sold: 3, stock: 7, reels: 2, periodReels: 2, shotReels: 0, lastReel: '23.10 сборн' });
     assert.equal(table.periodText, 'последние 2 недели (04-10.11 и 11.11-17.11)');
     assert.equal(table.stockLabel, 'остаток17,11');
     assert.equal(table.windowed, false);
@@ -145,6 +145,46 @@ describe('readAnalysisRows with a time frame', () => {
     assert.match(text, /Период короче 7 дней/);
     assert.match(text, /Reels за период: 1 \(на 1 позициях\)/);
     assert.doesNotMatch(text, /НОВЫЙ КОНТЕНТ-ПЛАН: d+ Reels/);
+  });
+});
+
+describe('the plan that the colors mark', () => {
+  const grid = [
+    headerRow,
+    makeRow({ article: 'PLANNED-SHOT', color: PURPLE_COLOR, sales: ['0', '1'], stock: '4', reels: ['01.10', '16.11'] }),
+    makeRow({ article: 'PLANNED-OLD', color: PURPLE_COLOR, sales: ['0', '0'], stock: '9', reels: ['01.10'] }),
+    makeRow({ article: 'PLANNED-GREEN', color: { red: 0, green: 1, blue: 0 }, sales: ['0', '0'], stock: '2', reels: [] }),
+    makeRow({ article: 'WHITE-SHOT', color: WHITE_COLOR, sales: ['2', '2'], stock: '5', reels: ['17.11'] }),
+    makeRow({ article: 'YELLOW-SHOT', color: YELLOW_COLOR, sales: ['2', '2'], stock: '5', reels: ['17.11'] }),
+  ];
+
+  it('counts only colored rows of the main assortment as planned, and the Reels of the last 7 days as shot', () => {
+    const result = analyzeRows(readAnalysisRows({ grid, today: TEST_DAY }));
+    assert.deepEqual([result.colorPlan.planned, result.colorPlan.shot, result.colorPlan.shotReels], [3, 1, 1]);
+    assert.deepEqual(result.colorPlan.unshot.map((row) => row.article), ['PLANNED-OLD', 'PLANNED-GREEN']);
+    assert.equal(result.colorPlan.shotText, 'с 12.11 по 18.11 (7 дн.)');
+  });
+
+  it('uses the time frame of the user as the shooting period', () => {
+    const window = { from: TEST_DAY - 50, to: TEST_DAY };
+    const result = analyzeRows(readAnalysisRows({ grid, today: TEST_DAY, window }));
+    assert.deepEqual([result.colorPlan.planned, result.colorPlan.shot, result.colorPlan.shotReels], [3, 2, 3]);
+    assert.match(result.colorPlan.shotText, /^с 29\.09 по 18\.11/);
+  });
+
+  it('writes the block with the numbers and the rule', () => {
+    const text = formatAnalysis(analyzeRows(readAnalysisRows({ grid, today: TEST_DAY })));
+    assert.match(text, /ЗАПЛАНИРОВАНО В КОНТЕНТ \(цветные строки основного ассортимента, без жёлтых и красных\): 3 позиций/);
+    assert.match(text, /Снято \(есть Reels с датой в этом периоде\): 1 позиций, всего Reels 1\./);
+    assert.match(text, /Осталось не снято: 2 позиций\./);
+    assert.match(text, /• PLANNED-OLD \(стр\. 3\): остаток 9/);
+    assert.doesNotMatch(text, /Плана Reels в таблице нет/);
+  });
+
+  it('says so when there are no colored rows', () => {
+    const plain = [headerRow, makeRow({ article: 'W1', color: WHITE_COLOR, sales: ['1', '1'], stock: '3', reels: [] })];
+    const text = formatAnalysis(analyzeRows(readAnalysisRows({ grid: plain, today: TEST_DAY })));
+    assert.match(text, /цветных строк нет, плана по цветам в таблице не вижу/);
   });
 });
 

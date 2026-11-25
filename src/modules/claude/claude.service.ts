@@ -26,7 +26,8 @@ import { ReplyActions } from './replyActions';
 import { userContent } from './userContent';
 import { WEB_SEARCH_TOOL } from './webSearchTool';
 
-const CHAT_TOKENS = 3000;
+// The model thinks before it writes, and a calculation in the sandbox needs room too. The thinking counts in this limit.
+const CHAT_TOKENS = 8000;
 const EXTRACT_TOKENS = 300;
 // A long calculation can pause the answer. The bot then asks Claude to go on, up to this many times.
 const MAX_ROUNDS = 5;
@@ -42,6 +43,9 @@ const OFFLINE_TEXT = 'Сейчас я не могу подключиться к 
 const TOO_LONG_TEXT = 'Расчёт занял слишком много времени. Попробуй спросить проще или по частям.';
 // The history keeps only text, so a note tells that a picture was in this message.
 const PHOTO_NOTE = '[the user sent a picture with this message; it is not in the history anymore]';
+
+// Without the code sandbox there are no table files. The report of the analysis tool still works.
+const NO_TABLE = { files: [], note: 'The files of the Google table are not in this request. For the report of the table call analyze_table.' };
 
 // A reply of the code itself: no labels, no reminders, no analysis.
 const NO_ACTIONS = { labels: {}, reminders: [], cancels: [], skipped: 0, analyze: undefined, report: '' };
@@ -95,12 +99,14 @@ export class ClaudeService {
     await this.files.dropFile(chatId);
   }
 
-  private contextOf(input: ChatInput): string {
+  private contextOf(job: { input: ChatInput; tableNote: string }): string {
+    const { input } = job;
     return buildContext(input.facts, {
       lastReport: this.memory.loadReport(input.chatId),
       lastAnalysis: this.memory.loadAnalysis(input.chatId),
       fileName: this.memory.loadFile(input.chatId)?.name,
       reminders: this.actions.pendingLines(input.chatId),
+      tableNote: job.tableNote,
     });
   }
 
@@ -119,20 +125,23 @@ export class ClaudeService {
   }
 
   // The prompt, then the notes of the team (the knowledge folder), then the facts of this chat.
-  private systemText(input: ChatInput): string {
+  private systemText(job: { input: ChatInput; tableNote: string }): string {
     const prompt = ASSISTANT_PROMPT.replaceAll('{today}', todayText()).replaceAll('{now}', clockText(Date.now()));
     const notes = readKnowledge(appEnv.knowledgeDir);
     const base = notes ? `${prompt}\n\nKNOWLEDGE BASE (notes that the team gave you)\n${notes}` : prompt;
-    return `${base}\n\nCONTEXT (facts of this chat)\n${this.contextOf(input)}`;
+    return `${base}\n\nCONTEXT (facts of this chat)\n${this.contextOf(job)}`;
   }
 
-  // The data file goes into the request only when the code sandbox is one of the tools.
+  // The data file and the files of the Google table go into the request only when the code sandbox is one of the tools.
   private async askChat(input: ChatInput, tools: Anthropic.Messages.ToolUnion[]): Promise<ChatReply> {
-    const file = tools.includes(CODE_TOOL) ? this.memory.loadFile(input.chatId) : undefined;
+    const useCode = tools.includes(CODE_TOOL);
+    const file = useCode ? this.memory.loadFile(input.chatId) : undefined;
+    const table = useCode ? await this.files.freshTable() : NO_TABLE;
+    const files = [...(file ? [file] : []), ...table.files];
     return this.sendRequest({
-      system: this.systemText(input),
+      system: this.systemText({ input, tableNote: table.note }),
       tools,
-      messages: [...pickRecent(this.memory.loadTurns(input.chatId)), { role: 'user', content: userContent(input.text, file, input.image) }],
+      messages: [...pickRecent(this.memory.loadTurns(input.chatId)), { role: 'user', content: userContent({ text: input.text, files, image: input.image }) }],
     });
   }
 

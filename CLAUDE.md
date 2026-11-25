@@ -7,6 +7,7 @@ A Telegram bot takes two 1C Excel files (sales, stock) and writes them to the sh
 - `src/modules/report` - parse files, match articles, build the plan, format the report (pure code, has tests).
 - `src/modules/sheet` - Google Sheets read and write.
 - `src/modules/analysis` - analysis of the sheet "отчет" by row colors (yellow and red = promo, all other = main assortment): sales, stock, published Reels, discount candidates, plan of 70 Reels. Pure code with tests. The analysis can take a time frame (Reels by date, sales by weekly columns). The weekly send is on Wednesday at 09:00 Kyiv time. After the numbers, `claude/tableAdvisor.ts` asks Claude for conclusions and recommendations from the exact report.
+- `src/modules/table` - turns every sheet of the Google table into CSV files (line number, row color name, group, planned mark). Pure code with tests. `claude/tableFiles.service.ts` uploads a fresh copy (at most every 5 minutes) to the code sandbox of Claude, so the chat can answer any question about the whole table with exact code.
 - `src/modules/telegram`, `claude`, `agent` - bot, chat, and the run.
 - Secrets are in `.env` and `google-key.json` (never commit).
 

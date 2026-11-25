@@ -5,17 +5,19 @@ import type { DayRange } from './dates';
 import type { SalesPick } from './salesPick';
 import type { TableColumns } from './tableColumns';
 
-import { reelDay } from './dates';
+import { dayText, reelDay } from './dates';
 import { findColumns } from './findColumns';
 import { pickSales } from './pickSales';
-import { rowGroup } from './rowGroup';
+import { isPlanned, rowGroup } from './rowGroup';
 import { toNumber } from './toNumber';
 
 // The article is in column D. A row without an article is not a product.
 const ARTICLE_INDEX = 3;
 const FIRST_LINE = 2;
+// Without a time frame, a Reels counts as shot when it is from the last week.
+const SHOT_DAYS = 7;
 
-type RowJob = { row: GridRow; line: number; columns: TableColumns; pick: SalesPick; today: number; window?: DayRange };
+type RowJob = { row: GridRow; line: number; columns: TableColumns; pick: SalesPick; today: number; window?: DayRange; shotWindow: DayRange };
 
 const cellAt = (cells: string[], index: number): string => cells[index] ?? '';
 
@@ -40,10 +42,12 @@ function toRow(job: RowJob): AnalysisRow[] {
       line: job.line,
       article,
       group: rowGroup(job.row),
+      planned: isPlanned(job.row),
       sold: job.pick.indexes.reduce((total, index) => total + toNumber(cellAt(cells, index)), 0),
       stock: toNumber(cellAt(cells, job.columns.stock)),
       reels: reels.length,
       periodReels: job.window ? countInWindow({ reels, today: job.today, window: job.window }) : reels.length,
+      shotReels: countInWindow({ reels, today: job.today, window: job.shotWindow }),
       lastReel: reels.at(-1) ?? '',
     },
   ];
@@ -57,7 +61,8 @@ export function readAnalysisRows(job: { grid: GridRow[]; today: number; window?:
   const headers = job.grid[0]?.cells ?? [];
   const columns = findColumns(headers);
   const pick = pickSales({ headers, columns, today: job.today, window: job.window });
-  const rows = job.grid.slice(1).flatMap((row, index) => toRow({ row, line: index + FIRST_LINE, columns, pick, today: job.today, window: job.window }));
+  const shotWindow = job.window ?? { from: job.today - SHOT_DAYS + 1, to: job.today };
+  const rows = job.grid.slice(1).flatMap((row, index) => toRow({ row, line: index + FIRST_LINE, columns, pick, today: job.today, window: job.window, shotWindow }));
   return {
     rows,
     stockLabel: cellAt(headers, columns.stock).trim(),
@@ -66,5 +71,6 @@ export function readAnalysisRows(job: { grid: GridRow[]; today: number; window?:
     hasSales: pick.hasSales,
     weakMax: pick.weakMax,
     windowed: job.window !== undefined,
+    shotText: job.window ? pick.periodText : `с ${dayText(shotWindow.from)} по ${dayText(shotWindow.to)} (${SHOT_DAYS} дн.)`,
   };
 }

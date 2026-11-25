@@ -1,6 +1,7 @@
 import type { AnalysisResult } from './analysisResult';
 import type { AnalysisRow } from './analysisRow';
 import type { AnalysisTable } from './analysisTable';
+import type { ColorPlan } from './colorPlan';
 import type { GroupReport } from './groupReport';
 
 import { ENOUGH_REELS, STOCK_ABOVE } from './analysisRules';
@@ -31,6 +32,19 @@ function reportGroup(job: { rows: AnalysisRow[]; weakMax: number }): GroupReport
   };
 }
 
+// The colored rows of the main assortment are planned. A planned row is shot when it has a Reels in the shooting period.
+function colorPlanOf(job: { main: AnalysisRow[]; shotText: string }): ColorPlan {
+  const planned = job.main.filter((row) => row.planned);
+  const shot = planned.filter((row) => row.shotReels > 0);
+  return {
+    planned: planned.length,
+    shot: shot.length,
+    shotReels: sumOf(shot, (row) => row.shotReels),
+    unshot: planned.filter((row) => row.shotReels === 0).sort(byStock),
+    shotText: job.shotText,
+  };
+}
+
 // A new discount: main assortment, stock above the limit, weak sales, and enough published Reels (all time).
 const isCandidate = (row: AnalysisRow, weakMax: number): boolean => row.stock > STOCK_ABOVE && row.sold <= weakMax && row.reels >= ENOUGH_REELS;
 
@@ -49,6 +63,7 @@ export function analyzeRows(table: AnalysisTable): AnalysisResult {
     main: reportGroup({ rows: main, weakMax }),
     candidates,
     plan: buildReelsPlan(planned),
+    colorPlan: colorPlanOf({ main, shotText: table.shotText }),
     stockLabel: table.stockLabel,
     periodText: table.periodText,
     notes: table.notes,

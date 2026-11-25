@@ -1,14 +1,14 @@
 import { Injectable } from '@nestjs/common';
 
 import type { PlanResult, ReportColumns, TableRow } from '@/modules/report';
-import type { GridRow } from './gridRow';
+import type { GridRow, SheetDump } from './gridRow';
 import type { SheetSnapshot } from './sheetSnapshot';
 
 import { appEnv } from '@/config/appEnv';
 import { normalizeArticle } from '@/modules/report';
 import { buildCells } from './buildCells';
 import { columnLetter } from './columnLetter';
-import { toGridRow } from './gridRow';
+import { toDumpRow, toGridRow } from './gridRow';
 import { samePeriod } from './samePeriod';
 import { SHEET_TITLE } from './sheetTitle';
 import { createSheetClient } from './sheetClient';
@@ -44,6 +44,20 @@ export class SheetService {
       fields: 'sheets.data.rowData.values(formattedValue,effectiveFormat.backgroundColor)',
     });
     return (response.data.sheets?.[0]?.data?.[0]?.rowData ?? []).map((row) => toGridRow(row));
+  }
+
+  /** Reads every sheet of the table with the text of all cells and the color of each row. It changes nothing. */
+  async readDumps(): Promise<SheetDump[]> {
+    const response = await this.client.spreadsheets.get({
+      spreadsheetId: this.requireSheetId(),
+      includeGridData: true,
+      fields: 'sheets(properties.title,data.rowData.values(formattedValue,effectiveFormat.backgroundColor))',
+    });
+    return (response.data.sheets ?? []).map((sheet) => {
+      const title = sheet.properties?.title ?? '';
+      const toRow = title === SHEET_TITLE ? toGridRow : toDumpRow;
+      return { title, rows: (sheet.data?.[0]?.rowData ?? []).map((row) => toRow(row)) };
+    });
   }
 
   private async readHeaders(spreadsheetId: string): Promise<string[]> {

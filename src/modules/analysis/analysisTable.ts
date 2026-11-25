@@ -2,7 +2,8 @@ import type { AnalysisRow } from './analysisRow';
 
 /**
  * The product rows of the sheet and what they were counted from.
- * periodText and notes explain the period. hasSales: false when there are no sales to judge. weakMax: the most items that count as weak sales.
+ * periodText and notes explain the period. weekLabels: the headers of the counted sales columns. salesDays: the days of sales that they cover.
+ * hasSales: false when there are no sales to judge. weakMax: the most items that count as weak sales.
  * windowed: true when the user asked for a time frame. shotText: the shooting period for the plan by color, as text.
  */
 export type AnalysisTable = {
@@ -10,6 +11,8 @@ export type AnalysisTable = {
   stockLabel: string;
   periodText: string;
   notes: string[];
+  weekLabels: string[];
+  salesDays: number;
   hasSales: boolean;
   weakMax: number;
   windowed: boolean;

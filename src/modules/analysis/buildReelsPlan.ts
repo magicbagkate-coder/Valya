@@ -1,18 +1,25 @@
 import type { AnalysisRow } from './analysisRow';
 import type { PlanItem } from './planItem';
 
-import { PLAN_ITEM_MAX, PLAN_TOTAL } from './analysisRules';
+import { LOW_STOCK, PLAN_ITEM_MAX, PLAN_TOTAL } from './analysisRules';
+import { scoreRow } from './scoreRow';
+import { trendMark } from './trend';
 
-// What sells better goes first. If two products sell the same, the one with fewer published Reels goes first. Then the bigger stock.
-const byPriority = (first: AnalysisRow, second: AnalysisRow): number =>
-  second.sold - first.sold || first.reels - second.reels || second.stock - first.stock || first.line - second.line;
+type Scored = { row: AnalysisRow; score: number };
+
+// The higher score goes first. If two products have the same score, the one that sold more goes first.
+const byScore = (first: Scored, second: Scored): number => second.score - first.score || second.row.sold - first.row.sold || first.row.line - second.row.line;
+
+// A stock just above the limit is allowed, but the plan warns about it.
+const noteOf = (row: AnalysisRow): string => (row.stock === LOW_STOCK + 1 ? `остаток всего ${row.stock}, проверьте запас перед съёмкой` : '');
 
 /**
- * Splits the Reels of the next week over the products that are given (the main assortment that is in stock).
- * Round after round, each product in the order of priority gets one more Reels, until the plan is full or each product has the maximum.
+ * Splits the Reels of the next week over the products that are given (the main assortment that is allowed in the plan).
+ * The products are ordered by their score. Round after round, each product in that order gets one more Reels,
+ * until the plan is full or each product has the maximum.
  */
-export function buildReelsPlan(rows: AnalysisRow[]): PlanItem[] {
-  const ranked = [...rows].sort(byPriority);
+export function buildReelsPlan(job: { rows: AnalysisRow[]; salesDays: number }): PlanItem[] {
+  const ranked = job.rows.map((row) => ({ row, score: scoreRow({ row, salesDays: job.salesDays }) })).sort(byScore);
   const counts = ranked.map(() => 0);
   let left = PLAN_TOTAL;
   for (let round = 0; round < PLAN_ITEM_MAX; round += 1) {
@@ -22,8 +29,11 @@ export function buildReelsPlan(rows: AnalysisRow[]): PlanItem[] {
       left -= 1;
     }
   }
-  return ranked.flatMap((row, index) => {
+  return ranked.flatMap(({ row, score }, index) => {
     const count = counts[index] ?? 0;
-    return count > 0 ? [{ line: row.line, article: row.article, count, sold: row.sold, stock: row.stock, reels: row.reels }] : [];
+    if (count === 0) return [];
+    return [
+      { line: row.line, article: row.article, count, score, sold: row.sold, trend: trendMark(row.weeks), stock: row.stock, reels: row.reels, lastReel: row.lastReel, note: noteOf(row) },
+    ];
   });
 }
